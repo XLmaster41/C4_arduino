@@ -1,0 +1,353 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Endereço correto do display
+
+const int buttonAddTime = 8;  // Botão para selecionar e iniciar
+const int buttonIncrease = 9;  // Botão para aumentar o tempo 
+const int buttonDecrease = 10;  // Botão para diminuir o tempo 
+const int buzzerPin = 7;       // Porta do buzzer  
+
+int minutes = 0;
+int seconds = 0;
+int resto = 0;
+int yellowTeamTime = 0;   // Tempo acumulado pelo Time Amarelo - GLOBAL
+int blueTeamTime = 0;     // Tempo acumulado pelo Time Azul - GLOBAL
+bool countingDown = false;
+bool isSystemActive = false;
+String currentMode = "Sabotagem"; // Modo de jogo atual
+bool modeSelected = false; // Para verificar se um modo foi selecionado
+unsigned long buttonPressStart = 0;
+bool buzzerPlayed = false;   // Verifica se o som de início já foi tocado
+bool timeEnded = false;      // Verifica se o tempo acabou
+bool countingYellow = false; // Para verificar se está contando para o Time Amarelo
+bool countingBlue = false;   // Para verificar se está contando para o Time Azul
+
+void setup() {
+ lcd.init();
+  lcd.begin(16, 2);
+  lcd.backlight();
+  lcd.clear();
+
+  pinMode(buttonAddTime, INPUT_PULLUP);
+  pinMode(buttonIncrease, INPUT_PULLUP);
+  pinMode(buttonDecrease, INPUT_PULLUP);
+  pinMode(buzzerPin, OUTPUT);
+}
+
+void loop() {
+  // Mensagem inicial: "C4 Airsoft"
+  if (!isSystemActive && !modeSelected) {
+    lcd.setCursor(0, 0);
+    lcd.print("      C4   ");
+    lcd.setCursor(0, 1);
+    lcd.print("    Airsoft   ");
+
+    if (digitalRead(buttonAddTime) == LOW) {
+      // Exibe o modo "Sabotagem" como padrão na primeira seleção
+      modeSelected = true;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("      Modo ");
+      lcd.setCursor(0,1);
+      lcd.print("    "+ currentMode);
+      delay(500); // Debounce
+    }
+  }
+
+  // Alternar entre modos "Sabotagem" e "Dominação"
+  if (modeSelected && !isSystemActive) {
+    if (digitalRead(buttonIncrease) == LOW) {
+        currentMode = "Sabotagem";  // Troca para o modo Sabotagem
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("      Modo ");
+        lcd.setCursor(0,1);
+        lcd.print("    "+ currentMode);
+        delay(500); // Debounce
+    }
+
+    if (digitalRead(buttonDecrease) == LOW) {
+        currentMode = "Dominacao";  // Troca para o modo Dominação
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("      Modo ");
+        lcd.setCursor(0,1);
+        lcd.print("    "+ currentMode);
+        delay(500); // Debounce
+    }
+
+    // Iniciar o modo selecionado
+    if (digitalRead(buttonAddTime) == LOW) {
+        lcd.clear(); // Limpa o LCD antes de iniciar o modo
+        delay(500); // Debounce
+
+        // Exibir tempo imediatamente após a seleção do modo
+        updateTimeDisplay(); // Atualiza o display com o tempo
+
+        if (currentMode == "Sabotagem") {
+            startSabotagem(); // Inicia o modo Sabotagem
+        } else if (currentMode == "Dominacao") {
+            startDominacao(); // Inicia o modo Dominação
+        }
+    }
+  }
+}
+
+// Função para iniciar o modo Sabotagem
+void startSabotagem() {
+  isSystemActive = true;
+  countingDown = false;
+  buzzerPlayed = false;
+  buttonPressStart = 0;
+  timeEnded = false;
+
+  while (!countingDown) {
+    if (digitalRead(buttonAddTime) == LOW) {
+      if (buttonPressStart == 0) {
+        buttonPressStart = millis(); // Marca o tempo de início
+      }
+
+      // Verifica se o botão foi pressionado por 2 segundos para iniciar a contagem regressiva
+      if (millis() - buttonPressStart >= 2000) {
+        countingDown = true;
+        buttonPressStart = 0;
+        buzzerPlayed = false; // Prepara o som de início
+        lcd.clear();          // Limpa o display para exibir a contagem regressiva
+      }
+    } else {
+      if (buttonPressStart != 0 && millis() - buttonPressStart < 2000) {
+          minutes += 5;   // Adiciona 10 segundos ao pressionar brevemente o botão
+        buttonPressStart = 0;
+        updateTimeDisplay(); // Atualiza o display com o tempo ajustado
+      }
+    }
+
+    delay(100); // Debounce
+  }
+
+  // Lógica de contagem regressiva
+  while (countingDown) {
+    if (!buzzerPlayed) {
+      // Tocar o som no início da contagem regressiva
+      for (int i = 0; i < 2; i++) {
+        tone(buzzerPin, 959);   // Toca o buzzer
+        delay(500);              // Duração do som
+        noTone(buzzerPin);       // Para o som
+        delay(200);              // Pequena pausa entre os toques
+      }
+      buzzerPlayed = true;       // Marca que o som foi tocado
+    }
+
+    // Atualiza o tempo
+    if (seconds == 0) {
+      if (minutes > 0) {
+        minutes--;
+        seconds = 59;
+      } else {
+        countingDown = false; // Para a contagem quando o tempo acaba
+        timeEnded = true;     // Marca que o tempo acabou
+
+        // Exibe a mensagem de tempo esgotado
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("     BOMBA");
+        lcd.setCursor(0, 1);
+        lcd.print("    DETONADA");
+
+        // Iniciar o som do buzzer enquanto a mensagem é exibida
+        for (int i = 0; i < 30; i++) { // Tocar o buzzer 20 vezes
+          tone(buzzerPin, 959); // Toca o buzzer
+          delay(100);            // Duração do tom
+          noTone(buzzerPin);      // Para o som
+          delay(100);             // Pausa entre os sons
+        }
+
+        // Espera até o botão ser pressionado para reiniciar
+        while (digitalRead(buttonAddTime) != LOW) {
+            // Aguarda a pressão do botão
+           }
+          delay(500); // Debounce
+
+           // Limpa o display e reseta o sistema
+          lcd.clear(); 
+          resetSystem();
+      }
+    } else {
+      seconds--;
+    }
+
+    // Aumentar ou diminuir o tempo apenas DURANTE a contagem regressiva
+    if (digitalRead(buttonIncrease) == LOW) {
+      increaseTime();      // Chama a função para aumentar o tempo
+      delay(200);          // Pequeno delay para evitar múltiplos incrementos rápidos
+    }
+    if (digitalRead(buttonDecrease) == LOW) {
+      decreaseTime();      // Chama a função para diminuir o tempo
+      delay(200);          // Pequeno delay para evitar múltiplos decrementos rápidos
+    }
+
+    updateTimeDisplay();
+    delay(1000); // Atraso de 1 segundo
+  }
+}
+
+// Função para aumentar o tempo
+void increaseTime() {
+  if (seconds < 59) {
+    seconds += 7; // Adiciona 1 segundo
+  } else if (minutes < 59) {
+    minutes++;
+    seconds = 1; // Reinicia os segundos
+  }
+
+  updateTimeDisplay(); // Atualiza o display com o tempo ajustado
+}
+
+// Função para diminuir o tempo
+void decreaseTime() { 
+  if (seconds > 0) {
+    if (seconds < 10) {
+      resto = seconds - 9;
+      if (resto < 0) resto = resto * -1; // Garante que resto nunca seja negativo
+      seconds -= 9;
+    } else {
+      seconds -= 9;
+    }
+  } else if (minutes > 0) {
+    minutes--;
+    seconds = 59 - resto;
+    if (seconds < 0) seconds = 0; // Garante que os segundos nunca sejam negativos
+  }
+  updateTimeDisplay(); // Atualiza o display com o tempo ajustado
+}
+
+// Atualizar o display com o tempo
+void updateTimeDisplay() {
+  lcd.setCursor(0, 0);
+  lcd.print("     Tempo   ");
+  lcd.setCursor(0, 1);
+  lcd.print((minutes < 10 ? "     0" : "     ") + String(minutes) + ":");
+  lcd.print((seconds < 10 ? "0" : "") + String(abs(seconds))); // Formatação para 00:00 
+}
+
+// Função para o modo Dominação (exemplo)
+void startDominacao() {
+  isSystemActive = true; 
+  countingDown = false;
+  buzzerPlayed = false;
+  buttonPressStart = 0;
+  timeEnded = false;
+
+  int totalSeconds = minutes * 60 + seconds; // Tempo total do jogo em segundos
+  int yellowTeamSeconds = 0;
+  int blueTeamSeconds = 0;
+
+  unsigned long previousMillis = millis();
+  unsigned long lastTeamMillis = millis();
+
+  int activeTeam = 0; // 0 = nenhum, 1 = amarelo, 2 = azul
+
+  // Som de início
+  for (int i = 0; i < 2; i++) {
+    tone(buzzerPin, 959);
+    delay(500);
+    noTone(buzzerPin);
+    delay(200);
+  }
+
+  lcd.clear();
+
+  while (totalSeconds > 0) {
+    unsigned long currentMillis = millis();
+
+    // A cada 1 segundo
+    if (currentMillis - previousMillis >= 1000) {
+      previousMillis = currentMillis;
+      totalSeconds--;
+
+      // Atualiza tempo de domínio
+      if (activeTeam == 1) yellowTeamSeconds++;
+      if (activeTeam == 2) blueTeamSeconds++;
+
+      // Mostra tempo restante no display
+      int displayMin = totalSeconds / 60;
+      int displaySec = totalSeconds % 60;
+
+      lcd.setCursor(0, 0);
+      lcd.print("     Tempo    ");
+      lcd.setCursor(0, 1);
+      lcd.print((displayMin < 10 ? "     0" : "     ") + String(displayMin) + ":");
+      lcd.print((displaySec < 10 ? "0" : "") + String(displaySec));
+    }
+
+    // Detecta domínio do time amarelo
+    if (digitalRead(buttonIncrease) == LOW) {
+      if (activeTeam != 1) {
+        activeTeam = 1;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("     Time");
+        lcd.setCursor(0, 1);
+        lcd.print("    AMARELO");
+        delay(500);
+      }
+    }
+
+    // Detecta domínio do time azul
+    if (digitalRead(buttonDecrease) == LOW) {
+      if (activeTeam != 2) {
+        activeTeam = 2;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("     Time");
+        lcd.setCursor(0, 1);
+        lcd.print("     AZUL");
+        delay(500);
+      }
+    }
+  }
+
+  // Tempo acabou - exibe vencedor
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(" FIM DE JOGO");
+
+  lcd.setCursor(0, 1);
+  if (yellowTeamSeconds > blueTeamSeconds) {
+    lcd.print(" Venceu: AMARELO");
+  } else if (blueTeamSeconds > yellowTeamSeconds) {
+    lcd.print(" Venceu: AZUL");
+  } else {
+    lcd.print("     EMPATE");
+  }
+
+  // Tocar buzzer final
+  for (int i = 0; i < 30; i++) {
+    tone(buzzerPin, 959);
+    delay(100);
+    noTone(buzzerPin);
+    delay(100);
+  }
+
+  // Aguarda botão para resetar
+  while (digitalRead(buttonAddTime) != LOW) {
+    // Espera
+  }
+  delay(500);
+  lcd.clear();
+  resetSystem();
+}
+
+// Função para resetar o sistema
+void resetSystem() {
+  isSystemActive = false;
+  modeSelected = false;
+  minutes = 0;
+  seconds = 0;
+  countingDown = false;
+  lcd.clear();  // Limpa o LCD antes de exibir qualquer coisa
+  buzzerPlayed = false;
+  buttonPressStart = 0; 
+  timeEnded = false; 
+}
